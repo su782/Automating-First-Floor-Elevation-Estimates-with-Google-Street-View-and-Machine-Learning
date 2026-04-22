@@ -2,22 +2,30 @@ import subprocess
 import pandas as pd
 import sys
 import os
+import urllib.request
+
+# =========================================================
+# 基础配置
+# =========================================================
 
 OUTPUT_ROOT = "outputs"
 
-# =========================================================
-# 在这里统一设置整个 pipeline 需要的配置
-# =========================================================
-GOOGLE_API_KEY = "AIzaSyBtuibB4nNTRnyXDnQgDq1nZpYffiOaAa8"
-DETECTRON_MODEL_PATH = r"C:\capstone\ffe_pipeline\output_cvat200_from_old4class\model_final.pth"
-SAM_CHECKPOINT_PATH = r"C:\capstone\ffe_pipeline\sam_vit_h_4b8939.pth"
+MODEL_URL = (
+    "https://github.com/su782/"
+    "Automating-First-Floor-Elevation-Estimates-with-Google-Street-View-and-Machine-Learning/"
+    "releases/download/model/model_final.pth"
+)
 
-# 关键：detectron2 源码目录
-DETECTRON2_SRC = r"C:\capstone\ffe_pipeline\detectron2-main"
+SAM_URL = "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth"
 
-# 如果你想强制用 cpu，也可以在这里传
-# 例如 "cpu" 或 "cuda"
-SAM_DEVICE = "cuda"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_DIR = os.path.join(BASE_DIR, "models")
+
+DETECTRON_MODEL_PATH = os.path.join(MODEL_DIR, "model_final.pth")
+SAM_CHECKPOINT_PATH = os.path.join(MODEL_DIR, "sam_vit_h_4b8939.pth")
+
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+SAM_DEVICE = "cuda"  
 
 SCRIPT_RETRIEVE = "nsi_retriever.py"
 SCRIPT_GSV = "gsv_download_walk15.py"
@@ -25,6 +33,22 @@ SCRIPT_SELECT = "front_view.py"
 SCRIPT_SAM = "refine_top1_with_sam.py"
 SCRIPT_DEPTH = "download_depthmaps_top1.py"
 SCRIPT_FFE = "estimate_ffe_rectified_from_sam.py"
+
+
+
+def download_file(url, save_path):
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    if not os.path.exists(save_path):
+        print(f"Downloading: {os.path.basename(save_path)}")
+        urllib.request.urlretrieve(url, save_path)
+        print("Download complete.")
+
+
+def ensure_models():
+    download_file(MODEL_URL, DETECTRON_MODEL_PATH)
+    download_file(SAM_URL, SAM_CHECKPOINT_PATH)
+
 
 
 def run_step(script_name, env):
@@ -53,32 +77,17 @@ def check_required_files():
     if missing:
         raise FileNotFoundError(f"Missing required scripts: {missing}")
 
-    if not os.path.exists(DETECTRON_MODEL_PATH):
-        raise FileNotFoundError(f"Detectron model not found: {DETECTRON_MODEL_PATH}")
-
-    if not os.path.exists(SAM_CHECKPOINT_PATH):
-        raise FileNotFoundError(f"SAM checkpoint not found: {SAM_CHECKPOINT_PATH}")
-
-    if not os.path.isdir(DETECTRON2_SRC):
-        raise FileNotFoundError(f"Detectron2 source dir not found: {DETECTRON2_SRC}")
-
 
 def build_pipeline_env(tract_root, tract_id):
     env = os.environ.copy()
 
-    # pipeline 基本信息
     env["PIPELINE_ROOT"] = tract_root
     env["TRACT_ID"] = str(tract_id)
 
-    # 统一传给所有模块
     env["GOOGLE_API_KEY"] = GOOGLE_API_KEY
     env["DETECTRON_MODEL_PATH"] = DETECTRON_MODEL_PATH
     env["SAM_CHECKPOINT_PATH"] = SAM_CHECKPOINT_PATH
     env["SAM_DEVICE"] = SAM_DEVICE
-    env["DETECTRON2_SRC"] = DETECTRON2_SRC
-
-    # 保险：把 detectron2 源码目录也塞进 PYTHONPATH
-    env["PYTHONPATH"] = DETECTRON2_SRC + os.pathsep + env.get("PYTHONPATH", "")
 
     return env
 
@@ -92,20 +101,10 @@ def stop_if_no_addresses(tract_root, tract_id):
     print(f"[INFO] addresses.csv rows = {len(df_addr)}")
 
     if len(df_addr) == 0:
-        print(f"[STOP] No addresses found for tract {tract_id}. Skip remaining steps.")
+        print(f"[STOP] No addresses found for tract {tract_id}.")
         return True
 
     return False
-
-
-def check_gsv_images_exist(tract_root):
-    gsv_root = os.path.join(tract_root, "gsv_images")
-    if not os.path.isdir(gsv_root):
-        raise RuntimeError(f"gsv_images folder not found: {gsv_root}")
-
-    subdirs = [f.path for f in os.scandir(gsv_root) if f.is_dir()]
-    print(f"[INFO] gsv address folders = {len(subdirs)}")
-    return gsv_root
 
 
 def run_pipeline_for_tract(tract_id):
@@ -119,6 +118,8 @@ def run_pipeline_for_tract(tract_id):
     print("==============================\n")
 
     check_required_files()
+    ensure_models()
+
     env = build_pipeline_env(tract_root, tract_id)
 
     run_step(SCRIPT_RETRIEVE, env)
@@ -127,8 +128,6 @@ def run_pipeline_for_tract(tract_id):
         return
 
     run_step(SCRIPT_GSV, env)
-    check_gsv_images_exist(tract_root)
-
     run_step(SCRIPT_SELECT, env)
     run_step(SCRIPT_SAM, env)
     run_step(SCRIPT_DEPTH, env)

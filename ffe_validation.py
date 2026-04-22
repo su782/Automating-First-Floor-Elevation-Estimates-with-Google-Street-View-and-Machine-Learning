@@ -6,7 +6,6 @@ ffe_df = pd.read_csv("C:/capstone/ffe_pipeline/ffe_depth_outputs/ffe_results.csv
 
 IMAGE_ROOT = "C:/capstone/ffe_pipeline/GSV_Downloads_Walk1/content/GSV_Downloads_Walk"
 
-# 先把所有 metadata 读进来
 metadata_list = []
 
 for root, dirs, files in os.walk(IMAGE_ROOT):
@@ -19,7 +18,6 @@ for root, dirs, files in os.walk(IMAGE_ROOT):
 
 print("Total metadata loaded:", len(metadata_list))
 
-# 从 top1_image 提取 pano 后缀
 def extract_pano_suffix(name):
     parts = name.split("_P_")
     if len(parts) < 2:
@@ -57,9 +55,7 @@ import requests
 import time
 import numpy as np
 
-# =========================
-# 1. BES 查询函数（取 z_floor + z_grade）
-# =========================
+
 def get_bes(lat, lon):
     url = (
         "https://data.cityofnewyork.us/resource/bsin-59hv.json"
@@ -78,9 +74,7 @@ def get_bes(lat, lon):
     return z_floor, z_grade
 
 
-# =========================
-# 2. 查询 BES
-# =========================
+
 ffe_df["z_floor_ft"] = None
 ffe_df["z_grade_ft"] = None
 
@@ -103,9 +97,6 @@ for i, row in ffe_df.iterrows():
 print("BES matched:", ffe_df["z_floor_ft"].notna().sum())
 
 
-# =========================
-# 3. 计算真实 FFE（feet → meters）
-# =========================
 ffe_df["true_ffe_ft"] = (
     ffe_df["z_floor_ft"] - ffe_df["z_grade_ft"]
 )
@@ -113,9 +104,6 @@ ffe_df["true_ffe_ft"] = (
 ffe_df["true_ffe_m"] = ffe_df["true_ffe_ft"] * 0.3048
 
 
-# =========================
-# 4. 计算误差
-# =========================
 valid = ffe_df.dropna(subset=["ffe_m", "true_ffe_m"]).copy()
 
 valid["error_m"] = valid["ffe_m"] - valid["true_ffe_m"]
@@ -133,9 +121,6 @@ print("Median Abs Error (m):", round(median, 3))
 print("Mean Bias (m):", round(bias, 3))
 
 
-# =========================
-# 5. 保存结果
-# =========================
 valid.to_csv("ffe_validation_ground_relative.csv", index=False)
 
 print("\nSaved: ffe_validation_ground_relative.csv")
